@@ -8,9 +8,8 @@ from telebot import types
 # --- CONFIGURATIONS ---
 API_TOKEN = '8600054596:AAFkDYPWhxlf9B5i8_-KrFksF0Fal09yUMA'
 OWNER_ID = 8442352135
-# New API URL without Key
+# Nayi API bina kisi key ke
 API_URL_TEMPLATE = "https://num-info-rajput.vercel.app/search?num={mobile}"
-DELETE_TIMER = 60 
 
 CHANNELS = {
     "1 🚀": {"id": "@snxhub", "url": "https://t.me/snxhub"},
@@ -164,7 +163,7 @@ def bcast(message):
             except: continue
         bot.reply_to(message, "✅ Broadcast sent to all groups.")
 
-# --- SEARCH LOGIC (FIXED UI & NA) ---
+# --- SEARCH LOGIC (SAME UI AS REQUESTED) ---
 @bot.message_handler(commands=['num'])
 def search_num(message):
     user_id = message.from_user.id
@@ -199,73 +198,11 @@ def search_num(message):
         bot.reply_to(message, "Usage: `/num 91xxxxxx`")
         return
 
-    status = bot.reply_to(message, "🔍 Searching Database...")
+    status = bot.reply_to(message, "🔍 Searching...")
     try:
-        resp = requests.get(API_URL_TEMPLATE.format(mobile=mobile), timeout=15).json()
+        res = requests.get(API_URL_TEMPLATE.format(mobile=mobile), timeout=15).json()
         
-        # Structure Normalization
+        # Structure set karna naye API ke liye
         records = []
-        if isinstance(resp, list): records = resp
-        elif isinstance(resp, dict): records = resp.get("data") or resp.get("records") or [resp]
+        if
         
-        valid = [r for r in records if isinstance(r, dict) and len(r) > 1]
-
-        if not valid:
-            bot.edit_message_text(f"No Data Found for `{mobile}` ⚠️", chat_id, status.message_id)
-            auto_delete(chat_id, status.message_id, 10)
-            return
-
-        db_query('UPDATE user_searches SET count = count + 1 WHERE user_id = ?', (user_id,))
-        rem = "Unlimited" if is_unl else (15 - (count + 1))
-        
-        # --- UI START ---
-        out = f"**━━━━━━━━━━━━━━━━━━━━**\n"
-        out += f"  **RAJPUT X INFO BOT**\n"
-        out += f"**━━━━━━━━━━━━━━━━━━━━**\n\n"
-        out += f"**Total Records 📝 : {len(valid)}**\n"
-        out += f"**Number ✍🏻 : `{mobile}`**\n"
-        out += f"**━━━━━━━━━━━━━━━━━━━━**\n\n"
-
-        for i, r in enumerate(valid[:5], 1):
-            def extract(keys):
-                for k, v in r.items():
-                    if any(word in k.lower() for word in keys):
-                        val = str(v).strip()
-                        if val and val.lower() not in ["n/a", "none", "null", ""]: return val
-                return ""
-
-            name = extract(['name', 'full'])
-            father = extract(['father', 'f_name', 'fname'])
-            addr = extract(['address', 'addr', 'location'])
-            alt = extract(['alt', 'other', 'mobile2', 'phone2'])
-
-            out += f"**RECORDS: {i}**\n"
-            out += f"📱 **MOBILE:** `{mobile}`\n"
-            if name: out += f"👤 **NAME:** `{name}`\n"
-            if father: out += f"🤠 **FATHER'S NAME:** `{father}`\n"
-            if addr: out += f"🏠 **ADDRESS:** `{addr}`\n"
-            if alt: out += f"📞 **ALT:** `{alt}`\n"
-            out += f"────────────────────\n"
-        
-        out += f"\n📉 **LEFT: {rem}**\n"
-        out += f"⏳ *Auto-delete in {DELETE_TIMER}s*"
-        
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("𝐒𝐍 𝐗 𝐃𝐀𝐃 🦁", url="https://t.me/sxdad"))
-        bot.edit_message_text(out[:4000], chat_id, status.message_id, parse_mode="Markdown", reply_markup=markup)
-        
-        auto_delete(chat_id, status.message_id, DELETE_TIMER)
-        try: auto_delete(chat_id, message.message_id, DELETE_TIMER)
-        except: pass
-    except:
-        bot.edit_message_text("API Error / Connection Timeout ⚠️", chat_id, status.message_id)
-
-@bot.callback_query_handler(func=lambda call: call.data == "verify_join")
-def verify(call):
-    if check_force_join(call.from_user.id):
-        bot.answer_callback_query(call.id, "✅ Verified!", show_alert=True)
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    else:
-        bot.answer_callback_query(call.id, "❌ Join all 3 first!", show_alert=True)
-
-bot.infinity_polling()
-            
