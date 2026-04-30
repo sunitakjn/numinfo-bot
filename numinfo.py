@@ -7,7 +7,7 @@ from telebot import types
 
 # --- CONFIGURATIONS ---
 # Replace 'YOUR_NEW_API_TOKEN' with your actual bot token
-API_TOKEN = 'YOUR_NEW_API_TOKEN'
+API_TOKEN = '8600054596:AAFkDYPWhxlf9B5i8_-KrFksF0Fal09yUMA'
 OWNER_ID = 8442352135
 API_URL_TEMPLATE = "https://num-info-rajput.vercel.app/search?num={mobile}"
 
