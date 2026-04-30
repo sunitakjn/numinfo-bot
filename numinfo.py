@@ -5,11 +5,10 @@ import time
 import sqlite3
 from telebot import types
 
-# --- CONFIGURATIONS ---
-API_TOKEN = '8600054596:AAFkDYPWhxlf9B5i8_-KrFksF0Fal09yUMA'
+# ================= CONFIG =================
+API_TOKEN = '8600054596:AAEKxLqeHN7PItqxK-SZ0I371ka8KH3A-MM'
 OWNER_ID = 8442352135
-# Nayi API bina kisi key ke
-API_URL_TEMPLATE = "https://num-info-rajput.vercel.app/search?num={mobile}"
+API_URL = "https://num-info-rajput.vercel.app/search?num={}"
 
 CHANNELS = {
     "1 🚀": {"id": "@snxhub", "url": "https://t.me/snxhub"},
@@ -19,190 +18,288 @@ CHANNELS = {
 
 bot = telebot.TeleBot(API_TOKEN)
 
-# --- DATABASE ENGINE ---
-def db_query(query, params=(), fetch=False):
-    conn = sqlite3.connect('bot_data.db')
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    res = cursor.fetchall() if fetch else None
-    conn.commit()
-    conn.close()
-    return res
+# ================= DATABASE =================
+def db(q, p=(), f=False):
+    con = sqlite3.connect("data.db")
+    cur = con.cursor()
+    cur.execute(q, p)
+    r = cur.fetchall() if f else None
+    con.commit()
+    con.close()
+    return r
 
-def init_db():
-    db_query('CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY)')
-    db_query('CREATE TABLE IF NOT EXISTS personal_users (id INTEGER PRIMARY KEY)')
-    db_query('CREATE TABLE IF NOT EXISTS unlimited_users (id INTEGER PRIMARY KEY)')
-    db_query('CREATE TABLE IF NOT EXISTS user_searches (user_id INTEGER PRIMARY KEY, count INTEGER, date TEXT)')
+def init():
+    db("CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY)")
+    db("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY)")
+    db("CREATE TABLE IF NOT EXISTS unlimited(id INTEGER PRIMARY KEY)")
+    db("CREATE TABLE IF NOT EXISTS usage(uid INTEGER PRIMARY KEY,count INTEGER,date TEXT)")
 
-init_db()
+init()
 
-# --- HELPERS ---
-def auto_delete(chat_id, message_id, delay=60):
-    def delete():
-        time.sleep(delay)
-        try: bot.delete_message(chat_id, message_id)
+# ================= HELPERS =================
+def auto_del(cid, mid, t=60):
+    def d():
+        time.sleep(t)
+        try: bot.delete_message(cid, mid)
         except: pass
-    threading.Thread(target=delete).start()
+    threading.Thread(target=d).start()
 
-def get_search_info(user_id):
-    today = time.strftime("%Y-%m-%d")
-    res = db_query('SELECT count, date FROM user_searches WHERE user_id = ?', (user_id,), fetch=True)
-    if not res or res[0][1] != today:
-        db_query('INSERT OR REPLACE INTO user_searches (user_id, count, date) VALUES (?, ?, ?)', (user_id, 0, today))
+def get_count(uid):
+    d = time.strftime("%Y-%m-%d")
+    r = db("SELECT count,date FROM usage WHERE uid=?", (uid,), True)
+    if not r or r[0][1] != d:
+        db("INSERT OR REPLACE INTO usage VALUES(?,?,?)", (uid,0,d))
         return 0
-    return res[0][0]
+    return r[0][0]
 
-def check_force_join(user_id):
-    for key, data in CHANNELS.items():
+def force_join(uid):
+    for c in CHANNELS.values():
         try:
-            status = bot.get_chat_member(data['id'], user_id).status
-            if status in ['left', 'kicked']: return False
-        except: return False
+            s = bot.get_chat_member(c['id'], uid).status
+            if s in ['left','kicked']:
+                return False
+        except:
+            return False
     return True
 
-# --- 1. GROUP COMMANDS ---
+def is_owner(uid):
+    return uid == OWNER_ID
+
+# ================= SEARCH =================
+@bot.message_handler(commands=['num'])
+def num_cmd(m):
+    uid = m.from_user.id
+    cid = m.chat.id
+
+    if not force_join(uid):
+        mk = types.InlineKeyboardMarkup()
+        for k, c in CHANNELS.items():
+            mk.add(types.InlineKeyboardButton(f"Join {k}", url=c['url']))
+        mk.add(types.InlineKeyboardButton("Verify ✅", callback_data="v"))
+        bot.reply_to(m, "❌ Join all channels first", reply_markup=mk)
+        return
+
+    groups = [i[0] for i in db("SELECT id FROM groups", f=True)]
+    users = [i[0] for i in db("SELECT id FROM users", f=True)]
+    unl = [i[0] for i in db("SELECT id FROM unlimited", f=True)]
+
+    if m.chat.type in ['group','supergroup'] and cid not in groups:
+        return
+
+    if m.chat.type == 'private' and uid != OWNER_ID and uid not in users:
+        bot.reply_to(m, "❌ No Personal Access")
+        return
+
+    unlimited = uid == OWNER_ID or uid in unl
+    count = get_count(uid)
+
+    if not unlimited and count >= 15:
+        bot.reply_to(m, "⚠️ Daily Limit Reached")
+        return
+
+    try:
+        number = m.text.split()[1]
+    except:
+        bot.reply_to(m, "❌ Use: /num 919XXXXXXXXX")
+        return
+
+    msg = bot.reply_to(m, "🔍 Searching...")
+
+    try:
+        res = requests.get(API_URL.format(number), timeout=10).json()
+    except:
+        bot.edit_message_text("⚠️ API Error", cid, msg.message_id)
+        return
+
+    results = res.get("results", [])
+
+    if not results:
+        bot.edit_message_text("❌ No Data Found", cid, msg.message_id)
+        return
+
+    db("UPDATE usage SET count=count+1 WHERE uid=?", (uid,))
+    rem = "Unlimited" if unlimited else (15-(count+1))
+
+    txt = f"📊 TOTAL: {len(results)} | LEFT: {rem}\n\n"
+
+    for i, r in enumerate(results[:5], 1):
+        mobile = r.get("mobile", "N/A")
+        name = r.get("name", "N/A")
+        father = r.get("fname", "N/A")
+        address = r.get("address", "N/A")
+        circle = r.get("circle", "N/A")
+        operator = r.get("operator", "N/A")
+        email = r.get("email", "N/A")
+
+        alt_numbers = set()
+        for key in ["alt", "phone", "mobile"]:
+            val = r.get(key)
+            if val:
+                if isinstance(val, list):
+                    for v in val:
+                        if str(v) != mobile:
+                            alt_numbers.add(str(v))
+                else:
+                    if str(val) != mobile:
+                        alt_numbers.add(str(val))
+
+        alt = ", ".join(alt_numbers) if alt_numbers else "Not Available"
+
+        txt += f"📁 REC {i}\n"
+        txt += f"📞 Number: {mobile}\n"
+        txt += f"👤 Name: {name}\n"
+        txt += f"👨 Father: {father}\n"
+        txt += f"🏠 Address: {address}\n"
+        txt += f"🌐 Circle: {circle}\n"
+        txt += f"📡 Operator: {operator}\n"
+        txt += f"📧 Email: {email}\n"
+        txt += f"📞 Alt: {alt}\n"
+        txt += "━━━━━━━━━━━━━━\n"
+
+    txt += "\n⚠️ Auto delete in 60 sec"
+
+    mk = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("SN X DAD 🦁", url="https://t.me/sxdad")
+    )
+
+    bot.edit_message_text(txt[:4000], cid, msg.message_id, reply_markup=mk)
+    auto_del(cid, msg.message_id, 60)
+
+# ================= VERIFY =================
+@bot.callback_query_handler(func=lambda c: c.data=="v")
+def verify(c):
+    if force_join(c.from_user.id):
+        bot.answer_callback_query(c.id, "✅ Verified", show_alert=True)
+        bot.delete_message(c.message.chat.id, c.message.message_id)
+    else:
+        bot.answer_callback_query(c.id, "❌ Join all first", show_alert=True)
+
+# ================= ADMIN =================
+
+# GROUPS
 @bot.message_handler(commands=['approvenumgc'])
-def app_gc(message):
-    if message.from_user.id == OWNER_ID:
-        db_query('INSERT OR IGNORE INTO groups (id) VALUES (?)', (message.chat.id,))
-        bot.reply_to(message, f"✅ Group `{message.chat.id}` Approved.")
+def approve_gc(m):
+    if not is_owner(m.from_user.id): return
+    db("INSERT OR IGNORE INTO groups VALUES(?)", (m.chat.id,))
+    bot.reply_to(m, "✅ Group Approved")
 
 @bot.message_handler(commands=['disapprovenumgc'])
-def dis_gc(message):
-    if message.from_user.id == OWNER_ID:
-        db_query('DELETE FROM groups WHERE id = ?', (message.chat.id,))
-        bot.reply_to(message, "❌ Group Removed.")
+def disapprove_gc(m):
+    if not is_owner(m.from_user.id): return
+    db("DELETE FROM groups WHERE id=?", (m.chat.id,))
+    bot.reply_to(m, "❌ Group Removed")
 
-@bot.message_handler(commands=['disaapprovenumgcall'])
-def dis_all_gc(message):
-    if message.from_user.id == OWNER_ID:
-        db_query('DELETE FROM groups')
-        bot.reply_to(message, "🗑 All Groups Removed.")
+@bot.message_handler(commands=['disapprovenumgcall'])
+def remove_all_gc(m):
+    if not is_owner(m.from_user.id): return
+    db("DELETE FROM groups")
+    bot.reply_to(m, "⚠️ All groups removed")
 
 @bot.message_handler(commands=['listapprovenumgc'])
-def list_gc(message):
-    if message.from_user.id == OWNER_ID:
-        rows = db_query('SELECT id FROM groups', fetch=True)
-        text = "👥 **Approved Groups:**\n" + "\n".join([f"`{r[0]}`" for r in rows]) if rows else "No Groups."
-        bot.reply_to(message, text, parse_mode="Markdown")
+def list_gc(m):
+    if not is_owner(m.from_user.id): return
+    data = db("SELECT id FROM groups", f=True)
+    if not data:
+        bot.reply_to(m, "❌ No groups")
+    else:
+        bot.reply_to(m, "\n".join([str(i[0]) for i in data]))
 
-# --- 2. PERSONAL COMMANDS ---
+# USERS
 @bot.message_handler(commands=['approvenum'])
-def app_user(message):
-    if message.from_user.id == OWNER_ID:
-        try:
-            uid = int(message.text.split()[1])
-            db_query('INSERT OR IGNORE INTO personal_users (id) VALUES (?)', (uid,))
-            bot.reply_to(message, f"👤 User `{uid}` Approved.")
-        except: bot.reply_to(message, "Usage: `/approvenum 12345`")
+def approve_user(m):
+    if not is_owner(m.from_user.id): return
+    try:
+        uid = int(m.text.split()[1])
+        db("INSERT OR IGNORE INTO users VALUES(?)", (uid,))
+        bot.reply_to(m, "✅ Approved")
+    except:
+        bot.reply_to(m, "❌ Invalid ID")
 
 @bot.message_handler(commands=['disapprovenum'])
-def dis_user(message):
-    if message.from_user.id == OWNER_ID:
-        try:
-            uid = int(message.text.split()[1])
-            db_query('DELETE FROM personal_users WHERE id = ?', (uid,))
-            bot.reply_to(message, f"❌ User `{uid}` Removed.")
-        except: pass
+def disapprove_user(m):
+    if not is_owner(m.from_user.id): return
+    try:
+        uid = int(m.text.split()[1])
+        db("DELETE FROM users WHERE id=?", (uid,))
+        bot.reply_to(m, "❌ Removed")
+    except:
+        bot.reply_to(m, "❌ Invalid ID")
 
 @bot.message_handler(commands=['disapprovenumall'])
-def dis_all_user(message):
-    if message.from_user.id == OWNER_ID:
-        db_query('DELETE FROM personal_users')
-        bot.reply_to(message, "🗑 All Personal Users Removed.")
+def remove_all_users(m):
+    if not is_owner(m.from_user.id): return
+    db("DELETE FROM users")
+    bot.reply_to(m, "⚠️ All users removed")
 
 @bot.message_handler(commands=['listapprovenum'])
-def list_user(message):
-    if message.from_user.id == OWNER_ID:
-        rows = db_query('SELECT id FROM personal_users', fetch=True)
-        text = "👤 **Personal Users:**\n" + "\n".join([f"`{r[0]}`" for r in rows]) if rows else "Empty."
-        bot.reply_to(message, text, parse_mode="Markdown")
+def list_users(m):
+    if not is_owner(m.from_user.id): return
+    data = db("SELECT id FROM users", f=True)
+    bot.reply_to(m, "\n".join([str(i[0]) for i in data]) or "No users")
 
-# --- 3. UNLIMITED COMMANDS ---
+# UNLIMITED
 @bot.message_handler(commands=['unlimitednum'])
-def app_unl(message):
-    if message.from_user.id == OWNER_ID:
-        try:
-            uid = int(message.text.split()[1])
-            db_query('INSERT OR IGNORE INTO unlimited_users (id) VALUES (?)', (uid,))
-            bot.reply_to(message, f"⭐ User `{uid}` is Unlimited.")
-        except: pass
+def add_unl(m):
+    if not is_owner(m.from_user.id): return
+    try:
+        uid = int(m.text.split()[1])
+        db("INSERT OR IGNORE INTO unlimited VALUES(?)", (uid,))
+        bot.reply_to(m, "♾ Unlimited added")
+    except:
+        bot.reply_to(m, "❌ Invalid ID")
 
 @bot.message_handler(commands=['disunlimitednum'])
-def dis_unl(message):
-    if message.from_user.id == OWNER_ID:
-        try:
-            uid = int(message.text.split()[1])
-            db_query('DELETE FROM unlimited_users WHERE id = ?', (uid,))
-            bot.reply_to(message, f"❌ User `{uid}` Unlimited Removed.")
-        except: pass
+def rem_unl(m):
+    if not is_owner(m.from_user.id): return
+    try:
+        uid = int(m.text.split()[1])
+        db("DELETE FROM unlimited WHERE id=?", (uid,))
+        bot.reply_to(m, "❌ Removed")
+    except:
+        bot.reply_to(m, "❌ Invalid ID")
 
 @bot.message_handler(commands=['disunlimitednumall'])
-def dis_all_unl(message):
-    if message.from_user.id == OWNER_ID:
-        db_query('DELETE FROM unlimited_users')
-        bot.reply_to(message, "🗑 All Unlimited Removed.")
+def rem_all_unl(m):
+    if not is_owner(m.from_user.id): return
+    db("DELETE FROM unlimited")
+    bot.reply_to(m, "⚠️ All unlimited removed")
 
 @bot.message_handler(commands=['listunlimitednum'])
-def list_unl(message):
-    if message.from_user.id == OWNER_ID:
-        rows = db_query('SELECT id FROM unlimited_users', fetch=True)
-        text = "⭐ **Unlimited Users:**\n" + "\n".join([f"`{r[0]}`" for r in rows]) if rows else "Empty."
-        bot.reply_to(message, text, parse_mode="Markdown")
+def list_unl(m):
+    if not is_owner(m.from_user.id): return
+    data = db("SELECT id FROM unlimited", f=True)
+    bot.reply_to(m, "\n".join([str(i[0]) for i in data]) or "No unlimited")
 
-# --- 4. BROADCAST ---
+# BROADCAST
 @bot.message_handler(commands=['broadcastnum'])
-def bcast(message):
-    if message.from_user.id == OWNER_ID:
-        msg_text = message.text.replace('/broadcastnum', '').strip()
-        if not msg_text: return
-        groups = db_query('SELECT id FROM groups', fetch=True)
-        for g_id in groups:
-            try: bot.send_message(g_id[0], f"📢 **BROADCAST**\n\n{msg_text}")
-            except: continue
-        bot.reply_to(message, "✅ Broadcast sent to all groups.")
-
-# --- SEARCH LOGIC (SAME UI AS REQUESTED) ---
-@bot.message_handler(commands=['num'])
-def search_num(message):
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    
-    if not check_force_join(user_id):
-        markup = types.InlineKeyboardMarkup()
-        for key, data in CHANNELS.items():
-            markup.add(types.InlineKeyboardButton(f"Join {key}", url=data['url']))
-        markup.add(types.InlineKeyboardButton("Verify ✅", callback_data="verify_join"))
-        bot.reply_to(message, "❌ **Please join channels first!**", reply_markup=markup)
-        return
-
-    approved_gcs = [r[0] for r in db_query('SELECT id FROM groups', fetch=True)]
-    approved_users = [r[0] for r in db_query('SELECT id FROM personal_users', fetch=True)]
-    unlimited_users = [r[0] for r in db_query('SELECT id FROM unlimited_users', fetch=True)]
-
-    if message.chat.type in ['group', 'supergroup'] and chat_id not in approved_gcs: return
-    if message.chat.type == 'private' and user_id != OWNER_ID and user_id not in approved_users:
-        bot.reply_to(message, "❌ No Personal Access.")
-        return
-
-    is_unl = (user_id == OWNER_ID or user_id in unlimited_users)
-    count = get_search_info(user_id)
-    if not is_unl and count >= 15:
-        bot.reply_to(message, "⚠️ Daily Limit (15) Reached!")
-        return
+def broadcast(m):
+    if not is_owner(m.from_user.id): return
 
     try:
-        mobile = message.text.split()[1]
+        msg = m.text.split(' ',1)[1]
     except:
-        bot.reply_to(message, "Usage: `/num 91xxxxxx`")
+        bot.reply_to(m, "Use: /broadcastnum message")
         return
 
-    status = bot.reply_to(message, "🔍 Searching...")
-    try:
-        res = requests.get(API_URL_TEMPLATE.format(mobile=mobile), timeout=15).json()
-        
-        # Structure set karna naye API ke liye
-        records = []
-        if
-        
+    users = db("SELECT id FROM users", f=True)
+    groups = db("SELECT id FROM groups", f=True)
+    unlimited = db("SELECT id FROM unlimited", f=True)
+
+    sent = set()
+    total = 0
+
+    for u in users + unlimited + groups:
+        uid = u[0]
+        if uid not in sent:
+            try:
+                bot.send_message(uid, msg)
+                sent.add(uid)
+                total += 1
+            except:
+                pass
+
+    bot.reply_to(m, f"✅ Sent to {total} chats")
+
+# ================= START =================
+print("Bot Running...")
+bot.infinity_polling()
