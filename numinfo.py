@@ -8,7 +8,6 @@ from telebot import types
 # --- CONFIGURATIONS ---
 API_TOKEN = '8600054596:AAFkDYPWhxlf9B5i8_-KrFksF0Fal09yUMA'
 OWNER_ID = 8442352135
-# Final URL Check
 API_URL_TEMPLATE = "https://num-info-rajput.vercel.app/search?num={mobile}"
 
 CHANNELS = {
@@ -91,7 +90,6 @@ def search_num(message):
         bot.reply_to(message, "❌ **Please join channels first!**", reply_markup=markup)
         return
 
-    # Permissions check
     approved_gcs = [r[0] for r in db_query('SELECT id FROM groups', fetch=True)]
     approved_users = [r[0] for r in db_query('SELECT id FROM personal_users', fetch=True)]
     unlimited_users = [r[0] for r in db_query('SELECT id FROM unlimited_users', fetch=True)]
@@ -115,7 +113,6 @@ def search_num(message):
 
     status = bot.reply_to(message, "🔍 Searching...")
     
-    # Headers to mimic a real browser request
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -124,18 +121,15 @@ def search_num(message):
         response = requests.get(API_URL_TEMPLATE.format(mobile=mobile), headers=headers, timeout=15)
         res = response.json()
 
-        # SUPER FLEXIBLE DATA EXTRACTION
         records = []
         if isinstance(res, list):
             records = res
         elif isinstance(res, dict):
-            # Try finding a list inside common keys
             for key in ['data', 'records', 'result', 'results', 'data_list']:
                 if isinstance(res.get(key), list):
                     records = res[key]
                     break
-            # If still empty, check if dict itself has name info
-            if not records and any(k in res for k in ['NAME', 'name', 'FULLNAME', 'Name']):
+            if not records and any(k in res for k in ['NAME', 'name', 'FULLNAME']):
                 records = [res]
         
         if not records:
@@ -149,19 +143,22 @@ def search_num(message):
         txt += f"📉 **SEARCHES LEFT: {rem}**\n\n"
         
         for i, r in enumerate(records, 1):
-            if i > 8: break # Message length limit safety
+            if i > 8: break 
             
-            # Smart Key Matching (handles NAME, name, Name etc)
             name = next((r.get(k) for k in ['NAME', 'name', 'FULLNAME', 'Name'] if r.get(k)), "N/A")
             fname = next((r.get(k) for k in ['FNAME', 'fname', 'FATHER_NAME', 'father_name', 'FATHER'] if r.get(k)), "N/A")
             addr = next((r.get(k) for k in ['ADDRESS', 'address', 'ADDR', 'Address'] if r.get(k)), "N/A")
             phone = next((r.get(k) for k in ['MOBILE', 'mobile', 'num', 'PHONE'] if r.get(k)), mobile)
+            
+            # --- ALT NUMBER LOGIC ADDED HERE ---
+            alt_num = next((r.get(k) for k in ['ALT', 'alt', 'ALT_NUMBER', 'phone2', 'ALTERNATE'] if r.get(k)), "N/A")
             
             txt += f"**RECORD:** {i}\n"
             txt += f"📱 **MOB:** `{phone}`\n"
             txt += f"👤 **NAME:** `{name}`\n"
             txt += f"🤠 **FATHER:** `{fname}`\n"
             txt += f"🏠 **ADR:** `{addr}`\n"
+            txt += f"📞 **ALT:** `{alt_num}`\n" # Alternate number display
             txt += "───────────────────\n"
         
         txt += "\n⚠️ *Deleting in 60s...*"
@@ -182,4 +179,3 @@ def verify(call):
         bot.answer_callback_query(call.id, "❌ Join all channels first!", show_alert=True)
 
 bot.infinity_polling(timeout=90, long_polling_timeout=90)
-    
