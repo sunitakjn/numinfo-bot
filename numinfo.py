@@ -10,8 +10,8 @@ from telebot import types
 BOT_TOKEN = '8600054596:AAFkDYPWhxlf9B5i8_-KrFksF0Fal09yUMA'
 OWNER_ID = 8442352135
 API_URL_TEMPLATE = "https://num-info-rajput.vercel.app/search?num={mobile}"
+DELETE_TIMER = 60  # Auto-delete after 60 seconds
 
-# Fixed Syntax for all 4 Channels
 CHANNELS = {
     "1 🚀": {"id": "@snxhub", "url": "https://t.me/snxhub"},
     "2 🚀": {"id": "@snnetwork7", "url": "https://t.me/snnetwork7"},
@@ -57,7 +57,12 @@ def get_search_info(user_id):
         return 0
     return res[0][0]
 
-# --- 1. SEARCH COMMAND (FIXED NA & ADDED ALT NUM) ---
+def delete_msg(chat_id, message_id, delay):
+    time.sleep(delay)
+    try: bot.delete_message(chat_id, message_id)
+    except: pass
+
+# --- 1. SEARCH COMMAND (/num) ---
 @bot.message_handler(commands=['num'])
 def search_num(message):
     user_id = message.from_user.id
@@ -87,50 +92,41 @@ def search_num(message):
         args = message.text.split()
         if len(args) < 2: return bot.reply_to(message, "⚠️ Usage: `/num [Number]`")
         mobile = args[1]
-        
         status_msg = bot.reply_to(message, "🔍 Searching...")
         
-        # API Data Fetching with Smart Parsing
         resp = requests.get(API_URL_TEMPLATE.format(mobile=mobile), timeout=15).json()
-        
-        records = []
-        if isinstance(resp, list): records = resp
-        elif isinstance(resp, dict): records = resp.get("data") or resp.get("records") or [resp]
-        
+        records = resp if isinstance(resp, list) else (resp.get("data") or resp.get("records") or [resp])
         valid = [r for r in records if isinstance(r, dict) and len(r) > 1]
 
         if not valid:
-            return bot.edit_message_text(f"⚠️ No data found for `{mobile}`.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text(f"⚠️ No data found for `{mobile}`.", message.chat.id, status_msg.message_id)
+            return
 
         db_query('UPDATE user_searches SET count = count + 1 WHERE user_id = ?', (user_id,))
         rem = "Unlimited" if is_unlimited else (15 - (count + 1))
         
-        # Formatting Output with Alt Num Support
-        out = f"📊 **RECORDS: {len(valid)}** | 📉 **LEFT: {rem}**\n\n"
+        out = f"📊 **RECORDS: {len(valid)}** | 📉 **LEFT: {rem}**\n⏳ *Deleting in {DELETE_TIMER}s*\n\n"
         for i, r in enumerate(valid[:6], 1):
-            def find_val(keys):
+            def find(keys):
                 for k, v in r.items():
-                    if any(x in k.lower() for x in keys) and v and str(v).lower() != "n/a": 
-                        return str(v).strip()
-                return "N/A"
+                    if any(x in k.lower() for x in keys) and v and str(v).lower() not in ["n/a", "none", ""]: return str(v)
+                return "Not Found"
             
-            name = find_val(['name', 'full', 'fname'])
-            father = find_val(['father', 'f_name', 'parent'])
-            address = find_val(['address', 'addr', 'location'])
-            alt_num = find_val(['alt', 'mobile2', 'phone', 'contact', 'other'])
-
-            out += f"**REC {i}:**\n👤 **NAME:** `{name}`\n🤠 **FATHER:** `{father}`\n🏠 **ADR:** `{address}`\n"
-            if alt_num != "N/A":
-                out += f"📞 **ALT NUM:** `{alt_num}`\n"
+            out += f"**REC {i}:**\n👤 **NAME:** `{find(['name', 'full'])}`\n🤠 **FATHER:** `{find(['father', 'f_name'])}`\n🏠 **ADR:** `{find(['address', 'addr'])}`\n"
+            alt = find(['alt', 'mobile2', 'phone2', 'contact'])
+            if alt != "Not Found": out += f"📞 **ALT:** `{alt}`\n"
             out += "───────────────────\n"
 
-        bot.edit_message_text(out[:4000], message.chat.id, status_msg.message_id, parse_mode="Markdown")
-    except Exception as e: 
-        bot.reply_to(message, "⚠️ Error processing request.")
+        sent = bot.edit_message_text(out[:4000], message.chat.id, status_msg.message_id, parse_mode="Markdown")
+        threading.Thread(target=delete_msg, args=(message.chat.id, sent.message_id, DELETE_TIMER)).start()
+        try: threading.Thread(target=delete_msg, args=(message.chat.id, message.message_id, DELETE_TIMER)).start()
+        except: pass
 
-# --- OWNER COMMANDS (ALL 13 KEPT SAFE) ---
+    except: bot.reply_to(message, "⚠️ Error.")
 
-# Group Management
+# --- OWNER COMMANDS (ALL 13 ADMIN CMDS INCLUDED) ---
+
+# 1-4: Group Management
 @bot.message_handler(commands=['approvenumgc', 'disapprovenumgc', 'disaapprovenumgcall', 'listapprovenumgc'])
 def group_mgt(message):
     if message.from_user.id != OWNER_ID: return
@@ -148,7 +144,7 @@ def group_mgt(message):
         rows = db_query('SELECT id FROM groups', fetch=True)
         bot.reply_to(message, "👥 Groups:\n" + "\n".join([f"`{r[0]}`" for r in rows]) if rows else "Empty.")
 
-# User DM Management
+# 5-8: User DM Management
 @bot.message_handler(commands=['approvenum', 'disapprovenum', 'disapprovenumall', 'listapprovenum'])
 def user_mgt(message):
     if message.from_user.id != OWNER_ID: return
@@ -168,7 +164,7 @@ def user_mgt(message):
             bot.reply_to(message, f"❌ User {uid} Removed.")
     except: bot.reply_to(message, "⚠️ Usage: `/[cmd] [User_ID]`")
 
-# Unlimited Management
+# 9-12: Unlimited Management
 @bot.message_handler(commands=['unlimitednum', 'disunlimitednum', 'disunlimitednumall', 'listunlimitednum'])
 def unl_mgt(message):
     if message.from_user.id != OWNER_ID: return
@@ -188,15 +184,13 @@ def unl_mgt(message):
             bot.reply_to(message, f"❌ {uid} Limit Restored.")
     except: bot.reply_to(message, "⚠️ Error.")
 
-# Broadcast
+# 13: Broadcast
 @bot.message_handler(commands=['broadcastnum'])
 def broadcast(message):
     if message.from_user.id != OWNER_ID: return
     txt = message.text.replace('/broadcastnum', '').strip()
     if not txt: return
-    groups = db_query('SELECT id FROM groups', fetch=True)
-    if not groups: return bot.reply_to(message, "❌ No groups to broadcast to.")
-    for g in groups:
+    for g in db_query('SELECT id FROM groups', fetch=True):
         try: bot.send_message(g[0], f"📢 **ANN:**\n\n{txt}")
         except: pass
     bot.reply_to(message, "✅ Done.")
@@ -208,10 +202,10 @@ def verify(call):
         bot.answer_callback_query(call.id, "✅ Verified!", show_alert=True)
         bot.delete_message(call.message.chat.id, call.message.message_id)
     else:
-        bot.answer_callback_query(call.id, "❌ Join all 3 channels first!", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Join all channels first!", show_alert=True)
 
 # Polling
 while True:
     try: bot.infinity_polling(timeout=90)
     except: time.sleep(5)
-    
+        
