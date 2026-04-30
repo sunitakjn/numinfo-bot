@@ -57,7 +57,7 @@ def get_search_info(user_id):
         return 0
     return res[0][0]
 
-# --- 1. SEARCH COMMAND ---
+# --- 1. SEARCH COMMAND (FIXED NA & ADDED ALT NUM) ---
 @bot.message_handler(commands=['num'])
 def search_num(message):
     user_id = message.from_user.id
@@ -84,12 +84,19 @@ def search_num(message):
         return bot.reply_to(message, "⚠️ Daily limit (15) reached.")
 
     try:
-        mobile = message.text.split()[1]
+        args = message.text.split()
+        if len(args) < 2: return bot.reply_to(message, "⚠️ Usage: `/num [Number]`")
+        mobile = args[1]
+        
         status_msg = bot.reply_to(message, "🔍 Searching...")
         
-        # API Data Fetching with Smart Parsing (Fixes N/A Issue)
+        # API Data Fetching with Smart Parsing
         resp = requests.get(API_URL_TEMPLATE.format(mobile=mobile), timeout=15).json()
-        records = resp if isinstance(resp, list) else (resp.get("data") or resp.get("records") or [resp])
+        
+        records = []
+        if isinstance(resp, list): records = resp
+        elif isinstance(resp, dict): records = resp.get("data") or resp.get("records") or [resp]
+        
         valid = [r for r in records if isinstance(r, dict) and len(r) > 1]
 
         if not valid:
@@ -98,19 +105,30 @@ def search_num(message):
         db_query('UPDATE user_searches SET count = count + 1 WHERE user_id = ?', (user_id,))
         rem = "Unlimited" if is_unlimited else (15 - (count + 1))
         
-        # Formatting Output
+        # Formatting Output with Alt Num Support
         out = f"📊 **RECORDS: {len(valid)}** | 📉 **LEFT: {rem}**\n\n"
         for i, r in enumerate(valid[:6], 1):
-            def find(keys):
+            def find_val(keys):
                 for k, v in r.items():
-                    if any(x in k.lower() for x in keys) and v: return v
+                    if any(x in k.lower() for x in keys) and v and str(v).lower() != "n/a": 
+                        return str(v).strip()
                 return "N/A"
-            out += f"**REC {i}:**\n👤 **NAME:** `{find(['name', 'full'])}`\n🤠 **FATHER:** `{find(['father', 'f_name'])}`\n🏠 **ADR:** `{find(['address', 'addr'])}`\n───────────────────\n"
+            
+            name = find_val(['name', 'full', 'fname'])
+            father = find_val(['father', 'f_name', 'parent'])
+            address = find_val(['address', 'addr', 'location'])
+            alt_num = find_val(['alt', 'mobile2', 'phone', 'contact', 'other'])
+
+            out += f"**REC {i}:**\n👤 **NAME:** `{name}`\n🤠 **FATHER:** `{father}`\n🏠 **ADR:** `{address}`\n"
+            if alt_num != "N/A":
+                out += f"📞 **ALT NUM:** `{alt_num}`\n"
+            out += "───────────────────\n"
 
         bot.edit_message_text(out[:4000], message.chat.id, status_msg.message_id, parse_mode="Markdown")
-    except: bot.reply_to(message, "⚠️ Usage: `/num [Number]`")
+    except Exception as e: 
+        bot.reply_to(message, "⚠️ Error processing request.")
 
-# --- OWNER COMMANDS (ALL 13 ADMIN COMMANDS) ---
+# --- OWNER COMMANDS (ALL 13 KEPT SAFE) ---
 
 # Group Management
 @bot.message_handler(commands=['approvenumgc', 'disapprovenumgc', 'disaapprovenumgcall', 'listapprovenumgc'])
@@ -176,7 +194,9 @@ def broadcast(message):
     if message.from_user.id != OWNER_ID: return
     txt = message.text.replace('/broadcastnum', '').strip()
     if not txt: return
-    for g in db_query('SELECT id FROM groups', fetch=True):
+    groups = db_query('SELECT id FROM groups', fetch=True)
+    if not groups: return bot.reply_to(message, "❌ No groups to broadcast to.")
+    for g in groups:
         try: bot.send_message(g[0], f"📢 **ANN:**\n\n{txt}")
         except: pass
     bot.reply_to(message, "✅ Done.")
@@ -188,10 +208,10 @@ def verify(call):
         bot.answer_callback_query(call.id, "✅ Verified!", show_alert=True)
         bot.delete_message(call.message.chat.id, call.message.message_id)
     else:
-        bot.answer_callback_query(call.id, "❌ Join all 4 channels first!", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Join all 3 channels first!", show_alert=True)
 
 # Polling
 while True:
     try: bot.infinity_polling(timeout=90)
     except: time.sleep(5)
-            
+    
