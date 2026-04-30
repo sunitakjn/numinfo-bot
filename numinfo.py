@@ -8,7 +8,7 @@ from telebot import types
 # --- CONFIGURATIONS ---
 API_TOKEN = '8600054596:AAFkDYPWhxlf9B5i8_-KrFksF0Fal09yUMA'
 OWNER_ID = 8442352135
-# API URL Updated
+# Final URL Check
 API_URL_TEMPLATE = "https://num-info-rajput.vercel.app/search?num={mobile}"
 
 CHANNELS = {
@@ -91,6 +91,7 @@ def search_num(message):
         bot.reply_to(message, "❌ **Please join channels first!**", reply_markup=markup)
         return
 
+    # Permissions check
     approved_gcs = [r[0] for r in db_query('SELECT id FROM groups', fetch=True)]
     approved_users = [r[0] for r in db_query('SELECT id FROM personal_users', fetch=True)]
     unlimited_users = [r[0] for r in db_query('SELECT id FROM unlimited_users', fetch=True)]
@@ -113,37 +114,48 @@ def search_num(message):
         return
 
     status = bot.reply_to(message, "🔍 Searching...")
+    
+    # Headers to mimic a real browser request
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
     try:
-        response = requests.get(API_URL_TEMPLATE.format(mobile=mobile), timeout=15)
+        response = requests.get(API_URL_TEMPLATE.format(mobile=mobile), headers=headers, timeout=15)
         res = response.json()
 
-        # Complex Data Extraction Logic to prevent "No Data Found"
+        # SUPER FLEXIBLE DATA EXTRACTION
         records = []
         if isinstance(res, list):
             records = res
         elif isinstance(res, dict):
-            # Check for common data keys
-            records = res.get("data") or res.get("records") or res.get("result")
-            # If no keys but dictionary has direct info
-            if not records and (res.get("NAME") or res.get("name")):
+            # Try finding a list inside common keys
+            for key in ['data', 'records', 'result', 'results', 'data_list']:
+                if isinstance(res.get(key), list):
+                    records = res[key]
+                    break
+            # If still empty, check if dict itself has name info
+            if not records and any(k in res for k in ['NAME', 'name', 'FULLNAME', 'Name']):
                 records = [res]
         
         if not records:
-            bot.edit_message_text("No Data Found ⚠️", chat_id, status.message_id)
+            bot.edit_message_text(f"No Data Found for `{mobile}` ⚠️", chat_id, status.message_id, parse_mode="Markdown")
             return
 
         db_query('UPDATE user_searches SET count = count + 1 WHERE user_id = ?', (user_id,))
         rem = "Unlimited" if is_unl else (15 - (count + 1))
         
-        txt = f"📊 **TOTAL RECORDS: {len(records) if isinstance(records, list) else 1}**\n"
+        txt = f"📊 **TOTAL RECORDS: {len(records)}**\n"
         txt += f"📉 **SEARCHES LEFT: {rem}**\n\n"
         
-        for i, r in enumerate(records if isinstance(records, list) else [records], 1):
-            if i > 10: break # Avoid too long messages
-            name = r.get('NAME') or r.get('name') or "N/A"
-            fname = r.get('fname') or r.get('FNAME') or r.get('father_name') or "N/A"
-            addr = r.get('ADDRESS') or r.get('address') or "N/A"
-            phone = r.get('MOBILE') or r.get('mobile') or r.get('num') or mobile
+        for i, r in enumerate(records, 1):
+            if i > 8: break # Message length limit safety
+            
+            # Smart Key Matching (handles NAME, name, Name etc)
+            name = next((r.get(k) for k in ['NAME', 'name', 'FULLNAME', 'Name'] if r.get(k)), "N/A")
+            fname = next((r.get(k) for k in ['FNAME', 'fname', 'FATHER_NAME', 'father_name', 'FATHER'] if r.get(k)), "N/A")
+            addr = next((r.get(k) for k in ['ADDRESS', 'address', 'ADDR', 'Address'] if r.get(k)), "N/A")
+            phone = next((r.get(k) for k in ['MOBILE', 'mobile', 'num', 'PHONE'] if r.get(k)), mobile)
             
             txt += f"**RECORD:** {i}\n"
             txt += f"📱 **MOB:** `{phone}`\n"
@@ -152,14 +164,14 @@ def search_num(message):
             txt += f"🏠 **ADR:** `{addr}`\n"
             txt += "───────────────────\n"
         
-        txt += "\n⚠️ *This message will be deleted in 1 minute.*"
+        txt += "\n⚠️ *Deleting in 60s...*"
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("𝐒𝐍 𝐗 𝐃𝐀𝐃 🦁", url="https://t.me/sxdad"))
         bot.edit_message_text(txt[:4000], chat_id, status.message_id, parse_mode="Markdown", reply_markup=markup)
         
         auto_delete(chat_id, status.message_id, 60)
+        
     except Exception as e:
-        print(f"Error: {e}")
-        bot.edit_message_text("No Data Found ⚠️", chat_id, status.message_id)
+        bot.edit_message_text(f"⚠️ API Error: No Response.", chat_id, status.message_id)
 
 @bot.callback_query_handler(func=lambda call: call.data == "verify_join")
 def verify(call):
@@ -169,5 +181,5 @@ def verify(call):
     else:
         bot.answer_callback_query(call.id, "❌ Join all channels first!", show_alert=True)
 
-# Increased polling timeout for stability
 bot.infinity_polling(timeout=90, long_polling_timeout=90)
+    
