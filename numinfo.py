@@ -7,17 +7,17 @@ import os
 from telebot import types
 
 # --- CONFIGURATIONS ---
-# Aapka Bot Token aur Owner ID yahan set hain
 BOT_TOKEN = '8600054596:AAFkDYPWhxlf9B5i8_-KrFksF0Fal09yUMA'
 OWNER_ID = 8442352135
 API_URL_TEMPLATE = "https://num-info-rajput.vercel.app/search?num={mobile}"
 
+# Fixed: Added missing closing brace '}' and comma
 CHANNELS = {
     "1 🚀": {"id": "@snxhub", "url": "https://t.me/snxhub"},
     "2 🚀": {"id": "@snnetwork7", "url": "https://t.me/snnetwork7"},
     "3 🚀": {"id": "@snxhub1", "url": "https://t.me/snxhub1"},
-    "4 🚀": {"id": "@snxayush1", "url": "https://t.me/snxayush1"
-           }
+    "4 🚀": {"id": "@snxayush1", "url": "https://t.me/snxayush1"}
+}
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -63,11 +63,14 @@ def check_force_join(user_id):
     for key, data in CHANNELS.items():
         try:
             status = bot.get_chat_member(data['id'], user_id).status
-            if status in ['left', 'kicked']: return False
-        except: return False
+            # Correct logic: status must be creator, administrator, or member
+            if status not in ['creator', 'administrator', 'member']:
+                return False
+        except:
+            return False
     return True
 
-# --- OWNER COMMANDS (14 COMMANDS) ---
+# --- OWNER COMMANDS ---
 
 @bot.message_handler(commands=['approvenumgc', 'disapprovenumgc', 'disaapprovenumgcall', 'listapprovenumgc'])
 def handle_group_cmds(message):
@@ -142,7 +145,7 @@ def broadcast(message):
         except: pass
     bot.reply_to(message, "✅ Done.")
 
-# --- SEARCH LOGIC (FIXED N/A) ---
+# --- SEARCH LOGIC ---
 @bot.message_handler(commands=['num'])
 def search_num(message):
     user_id = message.from_user.id
@@ -153,10 +156,10 @@ def search_num(message):
         for key, data in CHANNELS.items():
             markup.add(types.InlineKeyboardButton(f"Join {key}", url=data['url']))
         markup.add(types.InlineKeyboardButton("Verify ✅", callback_data="verify_join"))
-        bot.reply_to(message, "❌ **Join Channels!**", reply_markup=markup)
+        bot.reply_to(message, "❌ **Please join all channels first!**", reply_markup=markup)
         return
 
-    # Auth
+    # Auth logic remains same...
     is_owner = (user_id == OWNER_ID)
     approved_gcs = [r[0] for r in db_query('SELECT id FROM groups', fetch=True) or []]
     approved_users = [r[0] for r in db_query('SELECT id FROM personal_users', fetch=True) or []]
@@ -178,15 +181,13 @@ def search_num(message):
     try:
         mobile = message.text.split()[1]
     except:
-        bot.reply_to(message, "⚠️ Use: `/num [Number]`")
+        bot.reply_to(message, "⚠️ Usage: `/num [Number]`")
         return
 
     status = bot.reply_to(message, "🔍 Searching...")
 
     try:
         res = requests.get(API_URL_TEMPLATE.format(mobile=mobile), timeout=15).json()
-        
-        # Smart Data Parsing
         records = res if isinstance(res, list) else (res.get("data") or res.get("records") or [res])
         valid = [r for r in records if isinstance(r, dict) and len(r) > 1]
 
@@ -204,21 +205,25 @@ def search_num(message):
                 for k, v in r.items():
                     if any(x in k.lower() for x in keys) and v: return v
                 return "N/A"
-            
             out += f"**REC {i}:**\n👤 **NAME:** `{find(['name', 'full'])}`\n🤠 **FATHER:** `{find(['father', 'f_name'])}`\n🏠 **ADR:** `{find(['address', 'addr', 'city'])}`\n───────────────────\n"
 
         bot.edit_message_text(out[:4000], chat_id, status.message_id, parse_mode="Markdown")
         auto_delete(chat_id, status.message_id, 60)
     except: bot.edit_message_text("⚠️ API Error.", chat_id, status.message_id)
 
+# --- FIXED VERIFICATION CALLBACK ---
 @bot.callback_query_handler(func=lambda call: call.data == "verify_join")
 def verify(call):
     if check_force_join(call.from_user.id):
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        bot.answer_callback_query(call.id, "✅ Verified!", show_alert=True)
-    else: bot.answer_callback_query(call.id, "❌ Join First!", show_alert=True)
+        bot.answer_callback_query(call.id, "✅ Verified! Now you can use the bot.", show_alert=True)
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+    else:
+        bot.answer_callback_query(call.id, "❌ Error! Join all 4 channels first.", show_alert=True)
 
 while True:
     try: bot.infinity_polling(timeout=90)
     except: time.sleep(5)
-        
+                                  
