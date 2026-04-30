@@ -15,8 +15,7 @@ API_URL_TEMPLATE = "https://num-info-rajput.vercel.app/search?num={mobile}"
 CHANNELS = {
     "1 🚀": {"id": "@snxhub", "url": "https://t.me/snxhub"},
     "2 🚀": {"id": "@snnetwork7", "url": "https://t.me/snnetwork7"},
-    "3 🚀": {"id": "@snxhub1", "url": "https://t.me/snxhub1"},
-    "4 🚀": {"id": "@snxayush1", "url": "https://t.me/snxayush1"}
+    "3 🚀": {"id": "@snxhub1", "url": "https://t.me/snxhub1"}
 }
 
 bot = telebot.TeleBot(BOT_TOKEN)
