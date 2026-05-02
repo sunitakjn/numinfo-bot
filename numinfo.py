@@ -67,7 +67,7 @@ def force_join(uid):
 def is_owner(uid):
     return uid == OWNER_ID
 
-# ================= SEARCH (UPDATED FOR IMAGE API) =================
+    # ================= SEARCH (UPDATED) =================
 @bot.message_handler(commands=['num'])
 def num_cmd(m):
     uid = m.from_user.id
@@ -81,9 +81,9 @@ def num_cmd(m):
         bot.reply_to(m, "❌ Join all channels first", reply_markup=mk)
         return
 
-    groups = [i['id'] for i in db("SELECT id FROM groups", f=True)]
-    users = [i['id'] for i in db("SELECT id FROM users", f=True)]
-    unl = [i['id'] for i in db("SELECT id FROM unlimited", f=True)]
+    groups = [i[0] for i in db("SELECT id FROM groups", f=True)]
+    users = [i[0] for i in db("SELECT id FROM users", f=True)]
+    unl = [i[0] for i in db("SELECT id FROM unlimited", f=True)]
 
     if m.chat.type in ['group','supergroup'] and cid not in groups:
         return
@@ -108,43 +108,54 @@ def num_cmd(m):
     msg = bot.reply_to(m, "🔍 Searching...")
 
     try:
-        # API Response image ke mutabik fetch karna
-        response = requests.get(API_URL.format(number), timeout=10).json()
-        
-        # Image ke structure ke hisaab se: res['result']
-        res_data = response.get("result", {})
-        success = response.get("success", False)
-        
-    except Exception as e:
-        bot.edit_message_text(f"⚠️ API Error: {str(e)}", cid, msg.message_id)
+        res = requests.get(API_URL.format(number), timeout=10).json()
+    except:
+        bot.edit_message_text("⚠️ API Error", cid, msg.message_id)
         return
 
-    if not success or not res_data:
+    results = res.get("results", [])
+
+    if not results:
         bot.edit_message_text("❌ No Data Found", cid, msg.message_id)
         return
 
     db("UPDATE usage SET count=count+1 WHERE uid=?", (uid,))
     rem = "Unlimited" if unlimited else (15-(count+1))
 
-    # Image ke keys: country, country_code, rmn, number, etc.
-    # Note: Image mein limited keys hain, agar API zyada info deti hai toh wo bhi add ho jayengi
-    name = res_data.get("name", "Not Available")
-    num_val = res_data.get("number", number)
-    country = res_data.get("country", "India")
-    c_code = res_data.get("country_code", "+91")
-    
-    txt = f"📊 STATUS: SUCCESS | LEFT: {rem}\n\n"
-    txt += f"📁 RECORD FOUND\n"
-    txt += f"📞 Number: {num_val}\n"
-    txt += f"👤 Name: {name}\n"
-    txt += f"🌍 Country: {country} ({c_code})\n"
-    txt += f"⚡ Response: {response.get('response_time', 'N/A')}\n"
-    txt += "━━━━━━━━━━━━━━\n"
+    txt = f"📊 TOTAL: {len(results)} | LEFT: {rem}\n\n"
+
+    for i, r in enumerate(results[:5], 1):
+        mobile = r.get("mobile", "N/A")
+        name = r.get("name", "N/A")
+        father = r.get("fname", "N/A")
+        # Yahan ID field add kiya gaya hai (Aadhaar/Identity ke liye)
+        identity = r.get("id", "Not Available") 
+        address = r.get("address", "N/A")
+        circle = r.get("circle", "N/A")
+        email = r.get("email", "N/A")
+        alt = r.get("alt", "Not Available")
+
+        txt += f"📁 REC {i}\n"
+        txt += f"📞 Number: {mobile}\n"
+        txt += f"👤 Name: {name}\n"
+        txt += f"👨 Father: {father}\n"
+        txt += f"🆔 Identity: {identity}\n" # Naya line
+        txt += f"🏠 Address: {address}\n"
+        txt += f"🌐 Circle: {circle}\n"
+        txt += f"📧 Email: {email}\n"
+        txt += f"📞 Alt: {alt}\n"
+        txt += "━━━━━━━━━━━━━━\n"
+
     txt += "\n⚠️ Auto delete in 60 sec"
 
     mk = types.InlineKeyboardMarkup().add(
         types.InlineKeyboardButton("SN X DAD 🦁", url="https://t.me/sxdad")
     )
+
+    bot.edit_message_text(txt[:4000], cid, msg.message_id, reply_markup=mk)
+    auto_del(cid, msg.message_id, 60)
+    
+    
 
     bot.edit_message_text(txt[:4000], cid, msg.message_id, reply_markup=mk)
     auto_del(cid, msg.message_id, 60)
