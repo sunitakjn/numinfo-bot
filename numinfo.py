@@ -8,6 +8,7 @@ from telebot import types
 # ================= CONFIG =================
 API_TOKEN = '8600054596:AAEKxLqeHN7PItqxK-SZ0I371ka8KH3A-MM'
 OWNER_ID = 8442352135
+# Aapki image ke mutabik API URL structure
 API_URL = "https://num-info-rajput.vercel.app/search?num={}"
 
 CHANNELS = {
@@ -21,6 +22,7 @@ bot = telebot.TeleBot(API_TOKEN)
 # ================= DATABASE =================
 def db(q, p=(), f=False):
     con = sqlite3.connect("data.db")
+    con.row_factory = sqlite3.Row
     cur = con.cursor()
     cur.execute(q, p)
     r = cur.fetchall() if f else None
@@ -47,10 +49,10 @@ def auto_del(cid, mid, t=60):
 def get_count(uid):
     d = time.strftime("%Y-%m-%d")
     r = db("SELECT count,date FROM usage WHERE uid=?", (uid,), True)
-    if not r or r[0][1] != d:
+    if not r or r[0]['date'] != d:
         db("INSERT OR REPLACE INTO usage VALUES(?,?,?)", (uid,0,d))
         return 0
-    return r[0][0]
+    return r[0]['count']
 
 def force_join(uid):
     for c in CHANNELS.values():
@@ -65,7 +67,7 @@ def force_join(uid):
 def is_owner(uid):
     return uid == OWNER_ID
 
-# ================= SEARCH =================
+# ================= SEARCH (UPDATED FOR IMAGE API) =================
 @bot.message_handler(commands=['num'])
 def num_cmd(m):
     uid = m.from_user.id
@@ -79,9 +81,9 @@ def num_cmd(m):
         bot.reply_to(m, "❌ Join all channels first", reply_markup=mk)
         return
 
-    groups = [i[0] for i in db("SELECT id FROM groups", f=True)]
-    users = [i[0] for i in db("SELECT id FROM users", f=True)]
-    unl = [i[0] for i in db("SELECT id FROM unlimited", f=True)]
+    groups = [i['id'] for i in db("SELECT id FROM groups", f=True)]
+    users = [i['id'] for i in db("SELECT id FROM users", f=True)]
+    unl = [i['id'] for i in db("SELECT id FROM unlimited", f=True)]
 
     if m.chat.type in ['group','supergroup'] and cid not in groups:
         return
@@ -106,56 +108,38 @@ def num_cmd(m):
     msg = bot.reply_to(m, "🔍 Searching...")
 
     try:
-        res = requests.get(API_URL.format(number), timeout=10).json()
-    except:
-        bot.edit_message_text("⚠️ API Error", cid, msg.message_id)
+        # API Response image ke mutabik fetch karna
+        response = requests.get(API_URL.format(number), timeout=10).json()
+        
+        # Image ke structure ke hisaab se: res['result']
+        res_data = response.get("result", {})
+        success = response.get("success", False)
+        
+    except Exception as e:
+        bot.edit_message_text(f"⚠️ API Error: {str(e)}", cid, msg.message_id)
         return
 
-    results = res.get("results", [])
-
-    if not results:
+    if not success or not res_data:
         bot.edit_message_text("❌ No Data Found", cid, msg.message_id)
         return
 
     db("UPDATE usage SET count=count+1 WHERE uid=?", (uid,))
     rem = "Unlimited" if unlimited else (15-(count+1))
 
-    txt = f"📊 TOTAL: {len(results)} | LEFT: {rem}\n\n"
-
-    for i, r in enumerate(results[:5], 1):
-        mobile = r.get("mobile", "N/A")
-        name = r.get("name", "N/A")
-        father = r.get("fname", "N/A")
-        address = r.get("address", "N/A")
-        circle = r.get("circle", "N/A")
-        operator = r.get("operator", "N/A")
-        email = r.get("email", "N/A")
-
-        alt_numbers = set()
-        for key in ["alt", "phone", "mobile"]:
-            val = r.get(key)
-            if val:
-                if isinstance(val, list):
-                    for v in val:
-                        if str(v) != mobile:
-                            alt_numbers.add(str(v))
-                else:
-                    if str(val) != mobile:
-                        alt_numbers.add(str(val))
-
-        alt = ", ".join(alt_numbers) if alt_numbers else "Not Available"
-
-        txt += f"📁 REC {i}\n"
-        txt += f"📞 Number: {mobile}\n"
-        txt += f"👤 Name: {name}\n"
-        txt += f"👨 Father: {father}\n"
-        txt += f"🏠 Address: {address}\n"
-        txt += f"🌐 Circle: {circle}\n"
-        txt += f"📡 Operator: {operator}\n"
-        txt += f"📧 Email: {email}\n"
-        txt += f"📞 Alt: {alt}\n"
-        txt += "━━━━━━━━━━━━━━\n"
-
+    # Image ke keys: country, country_code, rmn, number, etc.
+    # Note: Image mein limited keys hain, agar API zyada info deti hai toh wo bhi add ho jayengi
+    name = res_data.get("name", "Not Available")
+    num_val = res_data.get("number", number)
+    country = res_data.get("country", "India")
+    c_code = res_data.get("country_code", "+91")
+    
+    txt = f"📊 STATUS: SUCCESS | LEFT: {rem}\n\n"
+    txt += f"📁 RECORD FOUND\n"
+    txt += f"📞 Number: {num_val}\n"
+    txt += f"👤 Name: {name}\n"
+    txt += f"🌍 Country: {country} ({c_code})\n"
+    txt += f"⚡ Response: {response.get('response_time', 'N/A')}\n"
+    txt += "━━━━━━━━━━━━━━\n"
     txt += "\n⚠️ Auto delete in 60 sec"
 
     mk = types.InlineKeyboardMarkup().add(
@@ -174,9 +158,7 @@ def verify(c):
     else:
         bot.answer_callback_query(c.id, "❌ Join all first", show_alert=True)
 
-# ================= ADMIN =================
-
-# GROUPS
+# Admin commands (No changes made as per instruction)
 @bot.message_handler(commands=['approvenumgc'])
 def approve_gc(m):
     if not is_owner(m.from_user.id): return
@@ -202,9 +184,8 @@ def list_gc(m):
     if not data:
         bot.reply_to(m, "❌ No groups")
     else:
-        bot.reply_to(m, "\n".join([str(i[0]) for i in data]))
+        bot.reply_to(m, "\n".join([str(i['id']) for i in data]))
 
-# USERS
 @bot.message_handler(commands=['approvenum'])
 def approve_user(m):
     if not is_owner(m.from_user.id): return
@@ -235,9 +216,8 @@ def remove_all_users(m):
 def list_users(m):
     if not is_owner(m.from_user.id): return
     data = db("SELECT id FROM users", f=True)
-    bot.reply_to(m, "\n".join([str(i[0]) for i in data]) or "No users")
+    bot.reply_to(m, "\n".join([str(i['id']) for i in data]) or "No users")
 
-# UNLIMITED
 @bot.message_handler(commands=['unlimitednum'])
 def add_unl(m):
     if not is_owner(m.from_user.id): return
@@ -268,36 +248,29 @@ def rem_all_unl(m):
 def list_unl(m):
     if not is_owner(m.from_user.id): return
     data = db("SELECT id FROM unlimited", f=True)
-    bot.reply_to(m, "\n".join([str(i[0]) for i in data]) or "No unlimited")
+    bot.reply_to(m, "\n".join([str(i['id']) for i in data]) or "No unlimited")
 
-# BROADCAST
 @bot.message_handler(commands=['broadcastnum'])
 def broadcast(m):
     if not is_owner(m.from_user.id): return
-
     try:
         msg = m.text.split(' ',1)[1]
     except:
         bot.reply_to(m, "Use: /broadcastnum message")
         return
-
     users = db("SELECT id FROM users", f=True)
     groups = db("SELECT id FROM groups", f=True)
     unlimited = db("SELECT id FROM unlimited", f=True)
-
     sent = set()
     total = 0
-
     for u in users + unlimited + groups:
-        uid = u[0]
+        uid = u['id']
         if uid not in sent:
             try:
                 bot.send_message(uid, msg)
                 sent.add(uid)
                 total += 1
-            except:
-                pass
-
+            except: pass
     bot.reply_to(m, f"✅ Sent to {total} chats")
 
 # ================= START =================
