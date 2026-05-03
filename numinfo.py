@@ -6,7 +6,7 @@ import sqlite3
 from telebot import types
 
 # ================= CONFIG =================
-API_TOKEN = '8600054596:AAEKxLqeHN7PItqxK-SZ0I371ka8KH3A-MM'
+API_TOKEN = '8600054596:AAHt5Fbfi5lG1UmTJTYj5KrHbVpq0Za0bvg'
 OWNER_ID = 8442352135
 # Aapki image ke mutabik API URL structure
 API_URL = "https://num-info-rajput.vercel.app/search?num={}"
